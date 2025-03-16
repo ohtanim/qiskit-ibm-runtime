@@ -1,6 +1,6 @@
 # This code is part of Qiskit.
 #
-# (C) Copyright IBM 2021.
+# (C) Copyright IBM 2021, 2025.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -26,6 +26,7 @@ _DEFAULT_ACCOUNT_CONFIG_JSON_FILE = os.path.join(
 _DEFAULT_ACCOUNT_NAME = "default"
 _DEFAULT_ACCOUNT_NAME_IBM_QUANTUM = "default-ibm-quantum"
 _DEFAULT_ACCOUNT_NAME_IBM_CLOUD = "default-ibm-cloud"
+_DEFAULT_ACCOUNT_NAME_IBM_DIRECT_ACCESS = "default-ibm-direct-access"
 _DEFAULT_CHANNEL_TYPE: ChannelType = "ibm_cloud"
 _CHANNEL_TYPES = [_DEFAULT_CHANNEL_TYPE, "ibm_quantum"]
 
@@ -94,6 +95,7 @@ class AccountManager:
                 _DEFAULT_ACCOUNT_NAME,
                 _DEFAULT_ACCOUNT_NAME_IBM_QUANTUM,
                 _DEFAULT_ACCOUNT_NAME_IBM_CLOUD,
+                _DEFAULT_ACCOUNT_NAME_IBM_DIRECT_ACCESS,
             ]
             if default is None:
                 return True
@@ -254,8 +256,11 @@ class AccountManager:
 
     @classmethod
     def _get_default_account_name(cls, channel: ChannelType) -> str:
-        return (
-            _DEFAULT_ACCOUNT_NAME_IBM_QUANTUM
-            if channel == "ibm_quantum"
-            else _DEFAULT_ACCOUNT_NAME_IBM_CLOUD
-        )
+        name = _DEFAULT_ACCOUNT_NAME_IBM_CLOUD
+        if channel == "ibm_quantum":
+            name = _DEFAULT_ACCOUNT_NAME_IBM_QUANTUM
+        elif channel == "ibm_direct_access":
+            name = _DEFAULT_ACCOUNT_NAME_IBM_DIRECT_ACCESS
+        else:
+            name = _DEFAULT_ACCOUNT_NAME_IBM_CLOUD
+        return name

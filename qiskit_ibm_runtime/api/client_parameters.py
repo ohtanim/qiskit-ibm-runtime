@@ -1,6 +1,6 @@
 # This code is part of Qiskit.
 #
-# (C) Copyright IBM 2021.
+# (C) Copyright IBM 2021, 2025.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -35,6 +35,7 @@ class ClientParameters:
         verify: bool = True,
         private_endpoint: Optional[bool] = False,
         url_resolver: Optional[Callable[[str, str, Optional[bool]], str]] = None,
+        **kwargs,
     ) -> None:
         """ClientParameters constructor.
 
@@ -58,6 +59,7 @@ class ClientParameters:
         if not url_resolver:
             url_resolver = default_runtime_url_resolver
         self.url_resolver = url_resolver
+        self.kwargs = kwargs
 
     def get_auth_handler(self) -> Union[CloudAuth, QuantumAuth]:
         """Returns the respective authentication handler."""

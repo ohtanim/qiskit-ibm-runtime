@@ -1,6 +1,6 @@
 # This code is part of Qiskit.
 #
-# (C) Copyright IBM 2021.
+# (C) Copyright IBM 2021, 2025.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -26,7 +26,7 @@ from ..api.auth import QuantumAuth, CloudAuth
 from ..utils import resolve_crn
 
 AccountType = Optional[Literal["cloud", "legacy"]]
-ChannelType = Optional[Literal["ibm_cloud", "ibm_quantum", "local"]]
+ChannelType = Optional[Literal["ibm_cloud", "ibm_quantum", "ibm_direct_access", "local"]]
 
 IBM_QUANTUM_API_URL = "https://auth.quantum.ibm.com/api"
 IBM_CLOUD_API_URL = "https://cloud.ibm.com"
@@ -46,7 +46,7 @@ class Account:
         """Account constructor.
 
         Args:
-            channel: Channel type, ``ibm_cloud`` or ``ibm_quantum``.
+            channel: Channel type, ``ibm_cloud`` or ``ibm_quantum`` or ``ibm_direct_access``.
             token: Account token to use.
             url: Authentication URL.
             instance: Service instance to use.
@@ -120,10 +120,19 @@ class Account:
                 verify=verify,
                 private_endpoint=private_endpoint,
             )
+        elif channel == "ibm_direct_access":
+            return DirectAccessAccount(
+                url=url,
+                token=token,
+                instance=instance,
+                proxies=proxies,
+                verify=verify,
+                private_endpoint=private_endpoint,
+            )
         else:
             raise InvalidAccountError(
                 f"Invalid `channel` value. Expected one of "
-                f"{['ibm_cloud', 'ibm_quantum']}, got '{channel}'."
+                f"{['ibm_cloud', 'ibm_quantum', 'ibm_direct_access']}, got '{channel}'."
             )
 
     def resolve_crn(self) -> None:
@@ -166,10 +175,10 @@ class Account:
     @staticmethod
     def _assert_valid_channel(channel: ChannelType) -> None:
         """Assert that the channel parameter is valid."""
-        if not (channel in ["ibm_cloud", "ibm_quantum"]):
+        if not (channel in ["ibm_cloud", "ibm_quantum", "ibm_direct_access"]):
             raise InvalidAccountError(
                 f"Invalid `channel` value. Expected one of "
-                f"['ibm_cloud', 'ibm_quantum'], got '{channel}'."
+                f"['ibm_cloud', 'ibm_quantum', 'ibm_direct_access'], got '{channel}'."
             )
 
     @staticmethod
@@ -313,4 +322,61 @@ class CloudAccount(Account):
                 f"Invalid `instance` value. Expected a non-empty string, got '{instance}'. "
                 "If using the ibm_quantum channel,",
                 "please specify the channel when saving your account with `channel = 'ibm_quantum'`.",
+            )
+
+class DirectAccessAccount(Account):
+    """Class that represents an account with channel 'ibm_direct_access'."""
+
+    def __init__(
+        self,
+        token: str,
+        url: Optional[str] = None,
+        instance: Optional[str] = None,
+        proxies: Optional[ProxyConfiguration] = None,
+        verify: Optional[bool] = True,
+        private_endpoint: Optional[bool] = False,
+    ):
+        """Account constructor.
+
+        Args:
+            token: Account token to use.
+            url: Authentication URL.
+            instance: Service instance to use.
+            proxies: Proxy configuration.
+            verify: Whether to verify server's TLS certificate.
+            private_endpoint: Connect to private API URL.
+        """
+        super().__init__(token, instance, proxies, verify)
+        if url is None:
+            raise ValueError(
+                "Invalid `url` value. Expected a non-emptry string. "
+                "please specify the channel when saving your account with `channel = 'ibm_direct_access'`.",
+            )
+        self.channel = "ibm_direct_access"
+        self.url = url
+        self.private_endpoint = private_endpoint
+
+    def get_auth_handler(self) -> AuthBase:
+        """Returns the Cloud authentication handler."""
+        return CloudAuth(api_key=self.token, crn=self.instance)
+
+    def resolve_crn(self) -> None:
+        """Resolves the corresponding unique Cloud Resource Name (CRN) for the given non-unique service
+        instance name and updates the ``instance`` attribute accordingly.
+
+        No-op if ``instance`` attribute is set to a Cloud Resource Name (CRN).
+
+        Raises:
+            CloudResourceNameResolutionError: if CRN value cannot be resolved.
+        """
+        pass
+
+    @staticmethod
+    def _assert_valid_instance(instance: str) -> None:
+        """Assert that the instance name is valid for the given account type."""
+        if not (isinstance(instance, str) and len(instance) > 0):
+            raise InvalidAccountError(
+                f"Invalid `instance` value. Expected a non-empty string, got '{instance}'. "
+                "If using the ibm_direct_access channel,",
+                "please specify the channel when saving your account with `channel = 'ibm_direct_access'`.",
             )

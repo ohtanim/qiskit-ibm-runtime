@@ -31,6 +31,7 @@ from .utils.backend_decoder import configuration_from_server_data
 from .accounts import AccountManager, Account, ChannelType
 from .api.clients import AuthClient, VersionClient
 from .api.clients.runtime import RuntimeClient
+from .api.clients.direct_access_runtime import DirectAccessRuntimeClient
 from .api.exceptions import RequestsApiError
 from .constants import QISKIT_IBM_RUNTIME_API_URL
 from .exceptions import IBMNotAuthorizedError, IBMInputValueError, IBMAccountError
@@ -74,6 +75,7 @@ class QiskitRuntimeService:
         verify: Optional[bool] = None,
         private_endpoint: Optional[bool] = None,
         url_resolver: Optional[Callable[[str, str, Optional[bool]], str]] = None,
+        **kwargs,
     ) -> None:
         """QiskitRuntimeService constructor
 
@@ -145,6 +147,7 @@ class QiskitRuntimeService:
             verify=self._account.verify,
             private_endpoint=self._account.private_endpoint,
             url_resolver=url_resolver,
+            **kwargs,
         )
 
         self._channel = self._account.channel
@@ -153,6 +156,9 @@ class QiskitRuntimeService:
 
         if self._channel == "ibm_cloud":
             self._api_client = RuntimeClient(self._client_params)
+            self._backend_allowed_list = self._discover_cloud_backends()
+        elif self._channel == "ibm_direct_access":
+            self._api_client = DirectAccessRuntimeClient(self._client_params)
             self._backend_allowed_list = self._discover_cloud_backends()
         else:
             auth_client = self._authenticate_ibm_quantum_account(self._client_params)
@@ -203,7 +209,7 @@ class QiskitRuntimeService:
                     )
             account = AccountManager.get(filename=filename, name=name)
         elif channel:
-            if channel and channel not in ["ibm_cloud", "ibm_quantum"]:
+            if channel and channel not in ["ibm_cloud", "ibm_quantum", "ibm_direct_access"]:
                 raise ValueError("'channel' can only be 'ibm_cloud' or 'ibm_quantum'")
             if token:
                 account = Account.create_account(

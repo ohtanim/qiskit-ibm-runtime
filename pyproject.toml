@@ -91,6 +91,7 @@ dependencies = [
     "ibm-platform-services>=0.22.6",
     "pydantic>=2.5.0,<2.10",
     "qiskit>=1.4.1",
+    "boto3",
     "packaging"
 ]
 

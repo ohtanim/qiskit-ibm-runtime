@@ -1,6 +1,6 @@
 # This code is part of Qiskit.
 #
-# (C) Copyright IBM 2021.
+# (C) Copyright IBM 2021, 2025.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -17,3 +17,4 @@ from .auth import AuthClient
 from .version import VersionClient
 from .runtime_ws import RuntimeWebsocketClient
 from .runtime import RuntimeClient
+from .direct_access_runtime import DirectAccessRuntimeClient
