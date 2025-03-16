@@ -440,7 +440,10 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         if self._s3client is None:
             raise DirectAccessError("S3 parameters are not specified.")
 
-        return self._s3client.get_object_as_str(f"logs_{job_id}")
+        try:
+            return self._s3client.get_object_as_str(f"logs_{job_id}")
+        except S3ClientError:
+            return ""
 
     # done
     def job_cancel(self, job_id: str) -> None:
@@ -477,10 +480,26 @@ class DirectAccessRuntimeClient(BaseBackendClient):
                 job_id, resp.data.decode(encoding="utf-8")
             )
 
+    def _get_job(self, job_id: str) -> dict[str, Any]:
+        resp = self._http.request(
+            "GET",
+            f"{self._endpoint}/v1/jobs",
+            headers=self._get_headers(),
+            retries=self._retries,
+        )
+        if resp.status != 200:
+            raise DirectAccessError(resp.json())
+
+        for job in resp.json()["jobs"]:
+            if job["id"] == job_id:
+                return job
+
+        return None
+
     # done
     def job_metadata(self, job_id: str) -> dict[str, Any]:
         """Returns job metadata"""
-        job = self.get_job(job_id)
+        job = self._get_job(job_id)
 
         secs = job["usage"].get("quantum_nanoseconds")
         if secs is not None:
@@ -515,22 +534,22 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         if resp.status != 200:
             raise DirectAccessError(resp.json())
 
-        for job in resp.json()["jobs"]:
-            if job["id"] == job_id:
-                return {
-                    "id": job_id,
-                    "state": {
-                        "status": job["status"],
-                        "reason": job.get("reason_message", ""),
-                        "reason_code": job.get("reason_code", ""),
-                    },
-                    "created": job["created_time"],
-                    "ended": job.get("end_time", ""),
-                    "backend": job["backend"],
-                    "status": job["status"],
-                }
+        job = self._get_job(job_id)
+        if job is None:
+            return None
 
-        return None
+        return {
+            "id": job_id,
+            "state": {
+                "status": job["status"],
+                "reason": job.get("reason_message", ""),
+                "reason_code": job.get("reason_code", ""),
+            },
+            "created": job["created_time"],
+            "ended": job.get("end_time", ""),
+            "backend": job["backend"],
+            "status": job["status"],
+        }
 
     # done
     def jobs_get(
