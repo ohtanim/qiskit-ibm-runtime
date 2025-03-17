@@ -226,6 +226,7 @@ class AccountManager:
             url=url,
             instance=os.getenv("QISKIT_IBM_INSTANCE"),
             channel=channel,
+            iam_api_url=os.getenv("QISKIT_IBM_IAM_API_URL"),
         )
 
     @classmethod
