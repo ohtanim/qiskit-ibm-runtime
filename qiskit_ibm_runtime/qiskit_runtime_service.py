@@ -75,6 +75,7 @@ class QiskitRuntimeService:
         verify: Optional[bool] = None,
         private_endpoint: Optional[bool] = None,
         url_resolver: Optional[Callable[[str, str, Optional[bool]], str]] = None,
+        iam_api_url: Optional[str] = None,
         **kwargs,
     ) -> None:
         """QiskitRuntimeService constructor
@@ -133,6 +134,7 @@ class QiskitRuntimeService:
             name=name,
             proxies=ProxyConfiguration(**proxies) if proxies else None,
             verify=verify,
+            iam_api_url=iam_api_url,
         )
 
         if private_endpoint is not None:
@@ -147,6 +149,7 @@ class QiskitRuntimeService:
             verify=self._account.verify,
             private_endpoint=self._account.private_endpoint,
             url_resolver=url_resolver,
+            iam_api_url=self._account.iam_api_url,
             **kwargs,
         )
 
@@ -186,6 +189,7 @@ class QiskitRuntimeService:
         name: Optional[str] = None,
         proxies: Optional[ProxyConfiguration] = None,
         verify: Optional[bool] = None,
+        iam_api_url: Optional[str] = None,
     ) -> Account:
         """Discover account."""
         account = None
@@ -219,6 +223,7 @@ class QiskitRuntimeService:
                     instance=instance,
                     proxies=proxies,
                     verify=verify_,
+                    iam_api_url=iam_api_url,
                 )
             else:
                 if url:
@@ -657,6 +662,7 @@ class QiskitRuntimeService:
         overwrite: Optional[bool] = False,
         set_as_default: Optional[bool] = None,
         private_endpoint: Optional[bool] = False,
+        iam_api_url: Optional[str] = None,
     ) -> None:
         """Save the account to disk for future use.
 
@@ -693,6 +699,7 @@ class QiskitRuntimeService:
             overwrite=overwrite,
             set_as_default=set_as_default,
             private_endpoint=private_endpoint,
+            iam_api_url=iam_api_url,
         )
 
     @staticmethod
@@ -979,7 +986,7 @@ class QiskitRuntimeService:
         """
         hub = group = project = None
         if instance:
-            if self._channel == "ibm_cloud":
+            if self._channel in ["ibm_cloud", "ibm_direct_access"]:
                 raise IBMInputValueError(
                     "The 'instance' keyword is only supported for ``ibm_quantum`` runtime."
                 )

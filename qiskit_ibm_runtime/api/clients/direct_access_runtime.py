@@ -12,12 +12,14 @@
 
 """Client for accessing IBM Quantum Qiskit Runtime Direct Access service."""
 
+import os
 import logging
 from typing import Any, Dict, List, Optional
 import uuid
 import json
 from datetime import datetime as python_datetime
 import urllib3
+from urllib3.util.retry import Retry
 from requests import Response
 import boto3
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
@@ -26,19 +28,20 @@ from ...utils import RuntimeEncoder
 from ..exceptions import RequestsApiError
 from ..client_parameters import ClientParameters
 from ..session import RetrySession
+from ...exceptions import IBMInputValueError
 
 logger = logging.getLogger(__name__)
 
-class DirectAccessError(BaseException):
-    """An exception raised by Direct Access Client"""
-
-class S3ClientError(DirectAccessError):
-    """An errors raised by S3Client"""
+STATUS_FORCELIST = (
+    500,  # General server error
+    502,  # Bad Gateway
+    504,  # Gateway Timeout
+)
 
 class S3Client:
     """A client to access S3"""
 
-    def __init__(
+    def __init__( # pylint: disable=too-many-positional-arguments
         self,
         endpoint: str,
         aws_access_key_id: str,
@@ -69,19 +72,7 @@ class S3Client:
             HttpMethod=method,
         )
 
-    def get_object_as_json(self, key_name: str) -> dict[str, Any]:
-        """Get S3 Object and returns as JSON dictionary"""
-        signed_url = self.create_presigned_url("GET", key_name, 3600)
-        resp = self._http.request(
-            "GET",
-            signed_url,
-        )
-        if resp.status != 200:
-            raise S3ClientError(resp.reason)
-
-        return resp.json()
-
-    def get_object_as_str(self, key_name: str) -> str:
+    def get_object(self, key_name: str) -> str:
         """Get S3 Object and returns as string text"""
         signed_url = self.create_presigned_url("GET", key_name, 3600)
         resp = self._http.request(
@@ -89,7 +80,7 @@ class S3Client:
             signed_url,
         )
         if resp.status != 200:
-            raise S3ClientError(resp.reason)
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
         return resp.data.decode(encoding="utf-8")
 
@@ -102,7 +93,7 @@ class S3Client:
             body=data,
         )
         if resp.status != 200:
-            raise S3ClientError(resp.reason)
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
 
 class DirectAccessRuntimeClient(BaseBackendClient):
@@ -113,20 +104,19 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         params: ClientParameters,
     ) -> None:
 
+        iam_api_url = os.environ.get("IBMQRUN_IAM_ENDPOINT")
+        if iam_api_url is None:
+            iam_api_url = params.iam_api_url
+        if iam_api_url is None:
+            raise IBMInputValueError("'iam_api_url' is not specified.")
+
         self._auth = IAMAuthenticator(
             apikey=params.token,
-            url=params.kwargs["iam_endpoint"],
+            url=iam_api_url,
         )
         self._instance = params.instance
 
         self._endpoint = params.url
-        self._s3client = S3Client(
-            params.kwargs["s3_endpoint"],
-            params.kwargs["aws_access_key_id"],
-            params.kwargs["aws_secret_access_key"],
-            params.kwargs["s3_bucket"],
-            params.kwargs["s3_region"],
-        )
 
         conn_param = params.connection_parameters()
         cert_reqs='CERT_NONE'
@@ -134,12 +124,61 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             cert_reqs='CERT_REQUIRED'
 
         self._http = urllib3.PoolManager(cert_reqs=cert_reqs)
-        self._retries = None
+        # Use default values in RetrySession
+        self._retries = Retry(
+            total=5,
+            connect=3,
+            backoff_factor=0.5,
+            status_forcelist=STATUS_FORCELIST)
 
         self._session = RetrySession(
             base_url=params.url,
             auth=params.get_auth_handler(),
             **params.connection_parameters(),
+        )
+
+        self._configuration_registry: Dict[str, Dict[str, Any]] = {}
+
+        self._kwargs = params.kwargs
+
+    def _create_s3client(self) -> S3Client:
+
+        s3_endpoint = os.environ.get("IBMQRUN_S3_ENDPOINT")
+        if s3_endpoint is None:
+            s3_endpoint = self._kwargs.get("s3_endpoint")
+        if s3_endpoint is None:
+            raise IBMInputValueError("'s3_endpoint' is not specified.")
+
+        aws_access_key_id = os.environ.get("IBMQRUN_AWS_ACCESS_KEY_ID")
+        if aws_access_key_id is None:
+            aws_access_key_id = self._kwargs.get("aws_access_key_id")
+        if aws_access_key_id is None:
+            raise IBMInputValueError("'aws_access_key_id' is not specified.")
+
+        aws_secret_access_key = os.environ.get("IBMQRUN_AWS_SECRET_ACCESS_KEY")
+        if aws_secret_access_key is None:
+            aws_secret_access_key = self._kwargs.get("aws_secret_access_key")
+        if aws_secret_access_key is None:
+            raise IBMInputValueError("'aws_secret_access_key' is not specified.")
+
+        s3_bucket = os.environ.get("IBMQRUN_S3_BUCKET")
+        if s3_bucket is None:
+            s3_bucket = self._kwargs.get("s3_bucket")
+        if s3_bucket is None:
+            raise IBMInputValueError("'s3_bucket' is not specified.")
+
+        s3_region = os.environ.get("IBMQRUN_S3_REGION")
+        if s3_region is None:
+            s3_region = self._kwargs.get("s3_region")
+        if s3_region is None:
+            raise IBMInputValueError("'s3_region' is not specified.")
+
+        return S3Client(
+            s3_endpoint,
+            aws_access_key_id,
+            aws_secret_access_key,
+            s3_bucket,
+            s3_region,
         )
 
     def _get_headers(self) -> dict[str, Any]:
@@ -149,7 +188,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             "Service-CRN": self._instance,
         }
 
-    # done
+
     def list_backends(self) -> List[str]:
         """Returns a list of available backend"""
         resp = self._http.request(
@@ -159,7 +198,10 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             retries=self._retries,
         )
         if resp.status != 200:
-            raise DirectAccessError(resp.json())
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
+
+        if (backend := os.environ.get("IBMQRUN_BACKEND")) is not None:
+            return [backend]
 
         backends = resp.json()["backends"]
         backend_names = []
@@ -177,11 +219,11 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             retries=self._retries,
         )
         if resp.status != 200:
-            raise DirectAccessError(resp.json())
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
         return resp.json()
 
-    # done
+
     def backend_status(self, backend_name: str) -> dict[str, Any]:
         """Returns BackendStatus for the specified backend
 
@@ -200,8 +242,8 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             "status_msg": "active" if backend["status"] == "online" else backend.get("message", ""),
         }
 
-    # done
-    def create_session(
+
+    def create_session( # pylint: disable=too-many-positional-arguments
         self,
         backend: Optional[str] = None,
         instance: Optional[str] = None,
@@ -216,7 +258,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         raise NotImplementedError()
 
-    # done
+
     def cancel_session(self, session_id: str) -> None:
         """Close all jobs in the runtime session.
 
@@ -225,7 +267,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         raise NotImplementedError()
 
-    # done
+
     def session_details(self, session_id: str) -> Dict[str, Any]:
         """Get session details.
 
@@ -237,9 +279,9 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         raise NotImplementedError()
 
-    # done
+
     def backend_configuration(
-        self, backend_name: str, _refresh: bool = False
+        self, backend_name: str, refresh: bool = False
     ) -> Dict[str, Any]:
         """Return the configuration of the IBM backend.
 
@@ -249,18 +291,20 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         Returns:
             Backend configuration.
         """
-        resp = self._http.request(
-            "GET",
-            f"{self._endpoint}/v1/backends/{backend_name}/configuration",
-            headers=self._get_headers(),
-            retries=self._retries,
-        )
-        if resp.status != 200:
-            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
+        if backend_name not in self._configuration_registry or refresh:
+            resp = self._http.request(
+                "GET",
+                f"{self._endpoint}/v1/backends/{backend_name}/configuration",
+                headers=self._get_headers(),
+                retries=self._retries,
+            )
+            if resp.status != 200:
+                raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
+            self._configuration_registry[backend_name] = resp.json()
 
-        return resp.json()
+        return self._configuration_registry[backend_name].copy()
 
-    # done
+
     def backend_properties(
         self, backend_name: str, datetime: Optional[python_datetime] = None
     ) -> Dict[str, Any]:
@@ -284,12 +328,12 @@ class DirectAccessRuntimeClient(BaseBackendClient):
 
         return resp.json()
 
-    # done
+
     def backend_pulse_defaults(self, _backend_name: str) -> Dict:
         """Return the pulse defaults of the IBM backend."""
         return None
 
-    # done
+
     def update_tags(self, job_id: str, tags: list) -> Response:
         """Update the tags of the job.
 
@@ -302,7 +346,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         raise NotImplementedError()
 
-    # done
+
     def usage(self) -> Dict[str, Any]:
         """Return monthly open plan usage information.
 
@@ -311,21 +355,21 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         raise NotImplementedError()
 
-    # done
-    def program_run(
+
+    def program_run( # pylint: disable=too-many-positional-arguments
         self,
         program_id: str,
         backend_name: Optional[str],
         params: Dict,
-        image: Optional[str],
-        hgp: Optional[str],
+        image: Optional[str], # pylint: disable=unused-argument
+        hgp: Optional[str], # pylint: disable=unused-argument
         log_level: Optional[str],
-        session_id: Optional[str],
-        job_tags: Optional[List[str]] = None,
-        max_execution_time: Optional[int] = None,
-        start_session: Optional[bool] = False,
-        session_time: Optional[int] = None,
-        private: Optional[bool] = False,
+        session_id: Optional[str], # pylint: disable=unused-argument
+        job_tags: Optional[List[str]] = None, # pylint: disable=unused-argument
+        max_execution_time: Optional[int] = None, # pylint: disable=unused-argument
+        start_session: Optional[bool] = False, # pylint: disable=unused-argument
+        session_time: Optional[int] = None, # pylint: disable=unused-argument
+        private: Optional[bool] = False, # pylint: disable=unused-argument
     ) -> Dict:
         """Run the specified program.
 
@@ -346,23 +390,22 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         Returns:
             JSON response.
         """
-        if self._s3client is None:
-            raise DirectAccessError("S3 parameters are not specified.")
+        s3 = self._create_s3client()
 
         job_id = str(uuid.uuid4())
 
-        self._s3client.put_object(
+        s3.put_object(
             f"params_{job_id}", json.dumps(params, cls=RuntimeEncoder)
         )
 
         s3_presigned_url_expires_in = 604800 # 1 weeks as max life
-        input_get_signed_url = self._s3client.create_presigned_url(
+        input_get_signed_url = s3.create_presigned_url(
             "GET", f"params_{job_id}", s3_presigned_url_expires_in
         )
-        results_put_signed_url = self._s3client.create_presigned_url(
+        results_put_signed_url = s3.create_presigned_url(
             "PUT", f"results_{job_id}", s3_presigned_url_expires_in
         )
-        logs_put_signed_url = self._s3client.create_presigned_url(
+        logs_put_signed_url = s3.create_presigned_url(
             "PUT", f"logs_{job_id}", s3_presigned_url_expires_in
         )
 
@@ -371,7 +414,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             "id": job_id,
             "log_level": log_level.lower(),
             "program_id": program_id,
-            "timeout_secs": 86400 if max_execution_time is None else max_execution_time,
+            "timeout_secs": int(os.environ.get("IBMQRUN_TIMEOUT_SECONDS", "86400")),
             "storage": {
                 "input": {
                     "type": "s3_compatible",
@@ -387,8 +430,6 @@ class DirectAccessRuntimeClient(BaseBackendClient):
                 },
             },
         }
-
-        print(json.dumps(job_input, indent=2))
 
         resp = self._http.request(
             "POST",
@@ -407,7 +448,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             "messages": [],
         }
 
-    # done
+
     def job_results(self, job_id: str) -> str:
         """Get the results of a program job.
 
@@ -417,12 +458,11 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         Returns:
             Job result.
         """
-        if self._s3client is None:
-            raise DirectAccessError("S3 parameters are not specified.")
+        s3 = self._create_s3client()
 
-        return self._s3client.get_object_as_str(f"results_{job_id}")
+        return s3.get_object(f"results_{job_id}")
 
-    # done
+
     def job_interim_results(self, job_id: str) -> str:
         """Get the interim results of a program job.
 
@@ -434,18 +474,17 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         raise NotImplementedError()
 
-    # done
+
     def job_logs(self, job_id: str) -> str:
         """Returns job logs"""
-        if self._s3client is None:
-            raise DirectAccessError("S3 parameters are not specified.")
+        s3 = self._create_s3client()
 
         try:
-            return self._s3client.get_object_as_str(f"logs_{job_id}")
-        except S3ClientError:
+            return s3.get_object(f"logs_{job_id}")
+        except RequestsApiError:
             return ""
 
-    # done
+
     def job_cancel(self, job_id: str) -> None:
         """Cancels a job"""
         resp = self._http.request(
@@ -461,7 +500,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
                 job_id, resp.data.decode(encoding="utf-8")
             )
 
-    # done
+
     def job_delete(self, job_id: str) -> None:
         """Delete a job.
 
@@ -488,7 +527,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             retries=self._retries,
         )
         if resp.status != 200:
-            raise DirectAccessError(resp.json())
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
         for job in resp.json()["jobs"]:
             if job["id"] == job_id:
@@ -496,7 +535,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
 
         return None
 
-    # done
+
     def job_metadata(self, job_id: str) -> dict[str, Any]:
         """Returns job metadata"""
         job = self._get_job(job_id)
@@ -515,8 +554,8 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             },
         }
 
-    # done
-    def job_get(self, job_id: str, exclude_params: bool = True) -> Dict:
+
+    def job_get(self, job_id: str, _exclude_params: bool = True) -> Dict:
         """Get job data.
 
         Args:
@@ -532,7 +571,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             retries=self._retries,
         )
         if resp.status != 200:
-            raise DirectAccessError(resp.json())
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
         job = self._get_job(job_id)
         if job is None:
@@ -551,8 +590,8 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             "status": job["status"],
         }
 
-    # done
-    def jobs_get(
+
+    def jobs_get( # pylint: disable=too-many-positional-arguments
         self,
         limit: int = None,
         skip: int = None,
@@ -617,7 +656,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             retries=self._retries,
         )
         if resp.status != 200:
-            raise DirectAccessError(resp.json())
+            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
         jobs = []
 

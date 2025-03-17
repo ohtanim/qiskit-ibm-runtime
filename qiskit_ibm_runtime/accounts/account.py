@@ -42,6 +42,7 @@ class Account:
         instance: Optional[str] = None,
         proxies: Optional[ProxyConfiguration] = None,
         verify: Optional[bool] = True,
+        iam_api_url: Optional[str] = None,
     ):
         """Account constructor.
 
@@ -60,6 +61,7 @@ class Account:
         self.proxies = proxies
         self.verify = verify
         self.private_endpoint: bool = False
+        self.iam_api_url = iam_api_url
 
     def to_saved_format(self) -> dict:
         """Returns a dictionary that represents how the account is saved on disk."""
@@ -81,6 +83,7 @@ class Account:
         instance = data.get("instance")
         verify = data.get("verify", True)
         private_endpoint = data.get("private_endpoint", False)
+        iam_api_url = data.get("iam_api_url")
         return cls.create_account(
             channel=channel,
             url=url,
@@ -89,6 +92,7 @@ class Account:
             proxies=proxies,
             verify=verify,
             private_endpoint=private_endpoint,
+            iam_api_url=iam_api_url,
         )
 
     @classmethod
@@ -101,6 +105,7 @@ class Account:
         proxies: Optional[ProxyConfiguration] = None,
         verify: Optional[bool] = True,
         private_endpoint: Optional[bool] = False,
+        iam_api_url: Optional[str] = None,
     ) -> "Account":
         """Creates an account for a specific channel."""
         if channel == "ibm_quantum":
@@ -127,7 +132,7 @@ class Account:
                 instance=instance,
                 proxies=proxies,
                 verify=verify,
-                private_endpoint=private_endpoint,
+                iam_api_url=iam_api_url,
             )
         else:
             raise InvalidAccountError(
@@ -152,6 +157,7 @@ class Account:
                 self.instance == other.instance,
                 self.proxies == other.proxies,
                 self.verify == other.verify,
+                self.iam_api_url == other.iam_api_url,
             ]
         )
 
@@ -170,6 +176,7 @@ class Account:
         self._assert_valid_url(self.url)
         self._assert_valid_instance(self.instance)
         self._assert_valid_proxies(self.proxies)
+        self._assert_valid_url(self.iam_api_url)
         return self
 
     @staticmethod
@@ -334,7 +341,7 @@ class DirectAccessAccount(Account):
         instance: Optional[str] = None,
         proxies: Optional[ProxyConfiguration] = None,
         verify: Optional[bool] = True,
-        private_endpoint: Optional[bool] = False,
+        iam_api_url: Optional[str] = None,
     ):
         """Account constructor.
 
@@ -344,9 +351,9 @@ class DirectAccessAccount(Account):
             instance: Service instance to use.
             proxies: Proxy configuration.
             verify: Whether to verify server's TLS certificate.
-            private_endpoint: Connect to private API URL.
+            iam_api_url: IAM API endpoint
         """
-        super().__init__(token, instance, proxies, verify)
+        super().__init__(token, instance, proxies, verify, iam_api_url)
         if url is None:
             raise ValueError(
                 "Invalid `url` value. Expected a non-emptry string. "
@@ -354,7 +361,6 @@ class DirectAccessAccount(Account):
             )
         self.channel = "ibm_direct_access"
         self.url = url
-        self.private_endpoint = private_endpoint
 
     def get_auth_handler(self) -> AuthBase:
         """Returns the Cloud authentication handler."""

@@ -35,6 +35,7 @@ class ClientParameters:
         verify: bool = True,
         private_endpoint: Optional[bool] = False,
         url_resolver: Optional[Callable[[str, str, Optional[bool]], str]] = None,
+        iam_api_url: str = None,
         **kwargs,
     ) -> None:
         """ClientParameters constructor.
@@ -59,11 +60,12 @@ class ClientParameters:
         if not url_resolver:
             url_resolver = default_runtime_url_resolver
         self.url_resolver = url_resolver
+        self.iam_api_url = iam_api_url
         self.kwargs = kwargs
 
     def get_auth_handler(self) -> Union[CloudAuth, QuantumAuth]:
         """Returns the respective authentication handler."""
-        if self.channel == "ibm_cloud":
+        if self.channel in ["ibm_cloud", "ibm_direct_access"]:
             return CloudAuth(api_key=self.token, crn=self.instance)
 
         return QuantumAuth(access_token=self.token)
