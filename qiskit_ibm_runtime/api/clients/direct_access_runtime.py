@@ -80,7 +80,10 @@ class S3Client:
             signed_url,
         )
         if resp.status != 200:
-            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
+            raise RequestsApiError(
+                resp.data.decode(encoding="utf-8"),
+                resp.status
+            )
 
         return resp.data.decode(encoding="utf-8")
 
@@ -93,7 +96,10 @@ class S3Client:
             body=data,
         )
         if resp.status != 200:
-            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
+            raise RequestsApiError(
+                resp.data.decode(encoding="utf-8"),
+                resp.status
+            )
 
 
 class DirectAccessRuntimeClient(BaseBackendClient):
@@ -108,15 +114,30 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         if iam_api_url is None:
             iam_api_url = params.iam_api_url
         if iam_api_url is None:
-            raise IBMInputValueError("'iam_api_url' is not specified.")
+            raise IBMInputValueError(
+                "'iam_api_url' is required for 'ibm_direct_access' channel."
+            )
 
         self._auth = IAMAuthenticator(
             apikey=params.token,
             url=iam_api_url,
         )
-        self._instance = params.instance
 
-        self._endpoint = params.url
+        self._instance = os.environ.get("IBMQRUN_SERVICE_CRN")
+        if self._instance is None:
+            self._instance = params.instance
+        if self._instance is None:
+            raise IBMInputValueError(
+                "'instance' is required for 'ibm_direct_access' channel."
+            )
+
+        self._endpoint = os.environ.get("IBMQRUN_DAAPI_ENDPOINT")
+        if self._endpoint is None:
+            self._endpoint = params.url
+        if self._endpoint is None:
+            raise IBMInputValueError(
+                "'url' is required for 'ibm_direct_access' channel."
+            )
 
         conn_param = params.connection_parameters()
         cert_reqs='CERT_NONE'
@@ -147,31 +168,41 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         if s3_endpoint is None:
             s3_endpoint = self._kwargs.get("s3_endpoint")
         if s3_endpoint is None:
-            raise IBMInputValueError("'s3_endpoint' is not specified.")
+            raise IBMInputValueError(
+                "'s3_endpoint' is required for 'ibm_direct_access' channel."
+            )
 
         aws_access_key_id = os.environ.get("IBMQRUN_AWS_ACCESS_KEY_ID")
         if aws_access_key_id is None:
             aws_access_key_id = self._kwargs.get("aws_access_key_id")
         if aws_access_key_id is None:
-            raise IBMInputValueError("'aws_access_key_id' is not specified.")
+            raise IBMInputValueError(
+                "'aws_access_key_id' is required for 'ibm_direct_access' channel."
+            )
 
         aws_secret_access_key = os.environ.get("IBMQRUN_AWS_SECRET_ACCESS_KEY")
         if aws_secret_access_key is None:
             aws_secret_access_key = self._kwargs.get("aws_secret_access_key")
         if aws_secret_access_key is None:
-            raise IBMInputValueError("'aws_secret_access_key' is not specified.")
+            raise IBMInputValueError(
+                "'aws_secret_access_key' is required for 'ibm_direct_access' channel."
+            )
 
         s3_bucket = os.environ.get("IBMQRUN_S3_BUCKET")
         if s3_bucket is None:
             s3_bucket = self._kwargs.get("s3_bucket")
         if s3_bucket is None:
-            raise IBMInputValueError("'s3_bucket' is not specified.")
+            raise IBMInputValueError(
+                "'s3_bucket' is required for 'ibm_direct_access' channel."
+            )
 
         s3_region = os.environ.get("IBMQRUN_S3_REGION")
         if s3_region is None:
             s3_region = self._kwargs.get("s3_region")
         if s3_region is None:
-            raise IBMInputValueError("'s3_region' is not specified.")
+            raise IBMInputValueError(
+                "'s3_region' is required for 'ibm_direct_access' channel."
+            )
 
         return S3Client(
             s3_endpoint,
@@ -392,7 +423,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         """
         s3 = self._create_s3client()
 
-        job_id = str(uuid.uuid4())
+        job_id = os.environ.get("IBMQRUN_JOB_ID", str(uuid.uuid4()))
 
         s3.put_object(
             f"params_{job_id}", json.dumps(params, cls=RuntimeEncoder)
@@ -439,7 +470,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             retries=self._retries,
         )
         if resp.status != 204:
-            return resp.json()["errors"]
+            return {"errors": resp.json()["errors"]}
 
         return {
             "id": job_id,
@@ -564,15 +595,6 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         Returns:
             JSON response.
         """
-        resp = self._http.request(
-            "GET",
-            f"{self._endpoint}/v1/jobs",
-            headers=self._get_headers(),
-            retries=self._retries,
-        )
-        if resp.status != 200:
-            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
-
         job = self._get_job(job_id)
         if job is None:
             return None
