@@ -28,7 +28,7 @@ from ...utils import RuntimeEncoder
 from ..exceptions import RequestsApiError
 from ..client_parameters import ClientParameters
 from ..session import RetrySession
-from ...exceptions import IBMInputValueError
+from ...exceptions import IBMInputValueError, RuntimeJobNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +159,8 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         )
 
         self._configuration_registry: Dict[str, Dict[str, Any]] = {}
-
         self._kwargs = params.kwargs
+
 
     def _create_s3client(self) -> S3Client:
 
@@ -212,6 +212,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             s3_region,
         )
 
+
     def _get_headers(self) -> dict[str, Any]:
         token = self._auth.token_manager.get_token()
         return {
@@ -240,6 +241,7 @@ class DirectAccessRuntimeClient(BaseBackendClient):
             backend_names.append(backend["name"])
 
         return backend_names
+
 
     def _get_backend(self, backend_name: str) -> Dict[str, str]:
         """Returns a backend details"""
@@ -550,7 +552,8 @@ class DirectAccessRuntimeClient(BaseBackendClient):
                 job_id, resp.data.decode(encoding="utf-8")
             )
 
-    def _get_job(self, job_id: str) -> dict[str, Any]:
+
+    def _list_jobs(self) -> List[Dict[str, Any]]:
         resp = self._http.request(
             "GET",
             f"{self._endpoint}/v1/jobs",
@@ -560,11 +563,15 @@ class DirectAccessRuntimeClient(BaseBackendClient):
         if resp.status != 200:
             raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
 
-        for job in resp.json()["jobs"]:
+        return resp.json()["jobs"]
+
+
+    def _get_job(self, job_id: str) -> dict[str, Any]:
+        for job in self._list_jobs():
             if job["id"] == job_id:
                 return job
 
-        return None
+        raise RuntimeJobNotFound(f"Job not found: {job_id}")
 
 
     def job_metadata(self, job_id: str) -> dict[str, Any]:
@@ -671,18 +678,8 @@ class DirectAccessRuntimeClient(BaseBackendClient):
                 "Filtering by job tags is not supported by 'ibm_direct_access'"
             )
 
-        resp = self._http.request(
-            "GET",
-            f"{self._endpoint}/v1/jobs",
-            headers=self._get_headers(),
-            retries=self._retries,
-        )
-        if resp.status != 200:
-            raise RequestsApiError(resp.data.decode(encoding="utf-8"), resp.status)
-
         jobs = []
-
-        for job in resp.json()["jobs"]:
+        for job in self._list_jobs():
             if created_after is not None:
                 job_dt = python_datetime.fromisoformat(job["created_time"])
                 if job_dt < created_after:
