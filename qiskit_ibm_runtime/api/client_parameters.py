@@ -72,6 +72,9 @@ class ClientParameters:
 
     def get_runtime_api_base_url(self) -> str:
         """Returns the Runtime API base url."""
+        if self.channel == "ibm_direct_access":
+            return self.url
+
         return self.url_resolver(self.url, self.instance, self.private_endpoint)
 
     def connection_parameters(self) -> Dict[str, Any]:
